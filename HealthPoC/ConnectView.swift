@@ -64,4 +64,3 @@ struct ConnectView: View {
     }
 }
 
-#Preview { ConnectView().environmentObject(AppModel()) }

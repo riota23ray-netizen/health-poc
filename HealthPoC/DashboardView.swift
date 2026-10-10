@@ -132,7 +132,7 @@ private struct SourcesCard: View {
             ForEach(sources) { source in
                 HStack {
                     Image(systemName: source.isWatch ? "applewatch" : "iphone")
-                        .foregroundStyle(source.isWatch ? .green : .secondary)
+                        .foregroundStyle(source.isWatch ? Color.green : Color.secondary)
                     VStack(alignment: .leading) {
                         Text(source.name)
                         Text(source.device).font(.caption).foregroundStyle(.secondary)
