@@ -1,0 +1,37 @@
+name: Build iOS app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (unsigned)
+        run: |
+          xcodebuild \
+            -project HealthPoC.xcodeproj \
+            -target HealthPoC \
+            -sdk iphoneos \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package .ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-iphoneos/HealthPoC.app Payload/
+          codesign --force --sign - --entitlements HealthPoC/HealthPoC.entitlements Payload/HealthPoC.app
+          zip -qry HealthPoC.ipa Payload
+
+      - name: Upload file
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthPoC-ipa
+          path: HealthPoC.ipa
