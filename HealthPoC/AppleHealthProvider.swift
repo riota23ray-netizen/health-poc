@@ -19,6 +19,7 @@ final class AppleHealthProvider: ActivityProvider {
     private let stepType = HKQuantityType(.stepCount)
     private let energyType = HKQuantityType(.activeEnergyBurned)
     private let exerciseType = HKQuantityType(.appleExerciseTime)
+    private let standType = HKQuantityType(.appleStandTime)
 
     // ── Этап 2: разрешения ─────────────────────────────────────
     /// Показывает системное окно Apple «Разрешить доступ к данным Здоровья».
@@ -28,7 +29,8 @@ final class AppleHealthProvider: ActivityProvider {
             stepType,
             energyType,
             exerciseType,
-            HKObjectType.workoutType()
+            HKObjectType.workoutType(),
+            standType
         ]
         try await store.requestAuthorization(toShare: [], read: read)
     }
@@ -55,8 +57,33 @@ final class AppleHealthProvider: ActivityProvider {
         allSources.formUnion(workouts.sources)
 
         result.exerciseMinutes = try await statisticsSum(exerciseType, unit: .minute(), today)
+        result.standMinutes = try await statisticsSum(standType, unit: .minute(), today)
         result.sources = allSources.sorted { $0.isWatch && !$1.isWatch }
         return result
+    }
+
+
+    /// Загружает реальные значения колец за каждый день выбранного месяца.
+    /// Используются агрегированные данные HealthKit, а не демонстрационные значения.
+    func fetchMonth(_ date: Date) async throws -> [DailyRingData] {
+        let calendar = Calendar.current
+        guard let interval = calendar.dateInterval(of: .month, for: date) else { return [] }
+        var days: [DailyRingData] = []
+        var cursor = interval.start
+        let now = Date()
+        while cursor < interval.end && cursor <= now {
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            let end = min(next, now)
+            let predicate = HKQuery.predicateForSamples(withStart: cursor, end: end, options: [])
+            async let calories = statisticsSum(energyType, unit: .kilocalorie(), predicate)
+            async let exercise = statisticsSum(exerciseType, unit: .minute(), predicate)
+            async let stand = statisticsSum(standType, unit: .minute(), predicate)
+            let values = try await (calories, exercise, stand)
+            days.append(DailyRingData(date: cursor, activeCalories: values.0,
+                                      exerciseMinutes: values.1, standMinutes: values.2))
+            cursor = next
+        }
+        return days
     }
 
     // ── Вспомогательные функции ────────────────────────────────
