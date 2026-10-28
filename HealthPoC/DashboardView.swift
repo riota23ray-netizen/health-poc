@@ -15,6 +15,18 @@ struct DashboardView: View {
     @EnvironmentObject var model: AppModel
     @State private var monthOffset = 0
     @State private var showCompetition = false
+    @State private var selectedDate = Calendar.current.startOfDay(for: Date())
+    @State private var showAccount = false
+    @State private var showSettings = false
+    @AppStorage("profileName") private var profileName = "Алексей"
+    @AppStorage("goalExerciseMinutes") private var goalExerciseMinutes = 30.0
+    @AppStorage("goalActiveCalories") private var goalActiveCalories = 500.0
+    @AppStorage("goalStandHours") private var goalStandHours = 12.0
+
+    private var selectedDayData: ActivityData? {
+        let key = Calendar.current.startOfDay(for: selectedDate)
+        return model.dailyHistory[key] ?? (Calendar.current.isDateInToday(selectedDate) ? model.data : nil)
+    }
 
     private var monthDate: Date {
         Calendar.current.date(byAdding: .month, value: monthOffset, to: Date()) ?? Date()
@@ -39,11 +51,25 @@ struct DashboardView: View {
                             .font(.system(size: 29, weight: .heavy, design: .rounded))
                             .foregroundStyle(AppPalette.ink)
                         Spacer()
+                        Button { showAccount = true } label: {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 21, weight: .semibold))
+                                .foregroundStyle(AppPalette.ink)
+                                .frame(width: 38, height: 38)
+                                .background(.white.opacity(0.9), in: Circle())
+                        }
+                        Button { showSettings = true } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(AppPalette.green)
+                                .frame(width: 38, height: 38)
+                                .background(.white.opacity(0.9), in: Circle())
+                        }
                         Button { Task { await model.refresh() } } label: {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundStyle(AppPalette.green)
-                                .frame(width: 42, height: 42)
+                                .frame(width: 38, height: 38)
                                 .background(.white.opacity(0.9), in: Circle())
                         }
                     }
@@ -69,17 +95,21 @@ struct DashboardView: View {
                         .font(.system(size: 19, weight: .heavy, design: .rounded))
                         .foregroundStyle(AppPalette.ink)
                         .padding(.top, 2)
-                    if let data = model.data {
-                        todayMetricRow(icon: "figure.run", tint: AppPalette.pink, title: "Упражнения", value: data.exerciseMinutes, goal: 30, unit: "мин", detail: "\(Int(data.exerciseMinutes)) / 30 мин")
-                        todayMetricRow(icon: "flame.fill", tint: AppPalette.green, title: "Калории", value: data.activeCalories.total, goal: 500, unit: "ккал", detail: "\(Int(data.activeCalories.total)) / 500 ккал")
-                        todayMetricRow(icon: "figure.cooldown", tint: AppPalette.blue, title: "Разминка", value: min(data.exerciseMinutes, 12), goal: 12, unit: "ч", detail: "\(Int(min(data.exerciseMinutes, 12))) / 12 ч")
+                    Text(Calendar.current.isDateInToday(selectedDate) ? "Сегодня" : selectedDate.formatted(.dateTime.day().month(.wide)).capitalized)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(AppPalette.muted)
+                    if let data = selectedDayData {
+                        todayMetricRow(icon: "figure.run", tint: AppPalette.pink, title: "Упражнения", value: data.exerciseMinutes, goal: goalExerciseMinutes, unit: "мин", detail: "\(Int(data.exerciseMinutes)) / \(Int(goalExerciseMinutes)) мин")
+                        todayMetricRow(icon: "flame.fill", tint: AppPalette.green, title: "Калории", value: data.activeCalories.total, goal: goalActiveCalories, unit: "ккал", detail: "\(Int(data.activeCalories.total)) / \(Int(goalActiveCalories)) ккал")
+                        todayMetricRow(icon: "figure.cooldown", tint: AppPalette.blue, title: "Разминка", value: data.standHours, goal: goalStandHours, unit: "ч", detail: "\(Int(data.standHours)) / \(Int(goalStandHours)) ч")
                         if let error = model.errorText {
                             Text(error).font(.footnote).foregroundStyle(.red).padding(.horizontal, 8)
                         }
-                    } else if model.isRefreshing {
+                    } else if model.isRefreshing || model.historyLoading {
                         ProgressView("Загружаем активность…").frame(maxWidth: .infinity).padding()
+                    } else if Calendar.current.startOfDay(for: selectedDate) > Calendar.current.startOfDay(for: Date()) {
+                        Text("Для этого дня данных пока нет.").font(.system(size: 12)).foregroundStyle(AppPalette.muted).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 16))
                     } else {
-                        ProgressView().frame(maxWidth: .infinity).padding()
+                        Text("Нет доступных данных за выбранный день.").font(.system(size: 12)).foregroundStyle(AppPalette.muted).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 16))
                     }
                 }
                 .padding(.horizontal, 14)
@@ -93,6 +123,15 @@ struct DashboardView: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
             .navigationDestination(isPresented: $showCompetition) { CompetitorSelectionView() }
+            .sheet(isPresented: $showAccount) { AccountView() }
+            .sheet(isPresented: $showSettings) { GoalsSettingsView() }
+            .task { await model.loadHistory(for: monthDate) }
+            .onChange(of: monthOffset) { _ in
+                let calendar = Calendar.current
+                if monthOffset == 0 { selectedDate = calendar.startOfDay(for: Date()) }
+                else { selectedDate = calendar.dateInterval(of: .month, for: monthDate)?.start ?? monthDate }
+                Task { await model.loadHistory(for: monthDate) }
+            }
         }
         .tint(AppPalette.green)
     }
@@ -118,20 +157,23 @@ struct DashboardView: View {
                         let day = Calendar.current.component(.day, from: date)
                         let isFuture = Calendar.current.startOfDay(for: date) > Calendar.current.startOfDay(for: Date())
                         let isToday = Calendar.current.isDateInToday(date)
-                        let progress = ringProgress(for: day, isFuture: isFuture, isToday: isToday)
-                        VStack(spacing: 2) {
-                            Text("\(day)").font(.system(size: 10, weight: isToday ? .bold : .medium)).foregroundStyle(isFuture ? AppPalette.muted.opacity(0.55) : AppPalette.ink)
-                            ZStack(alignment: .topTrailing) {
-                                TripleRings(progress: progress, size: 27, lineWidth: 2.5, faded: isFuture)
-                                    .frame(width: 29, height: 29)
-                                if !isFuture && progress.allSatisfy({ $0 >= 1 }) {
-                                    Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(AppPalette.green).background(.white, in: Circle()).offset(x: 2, y: -2)
-                                } else if !isFuture && day % 4 == 0 {
-                                    Circle().fill(Color.gray.opacity(0.35)).frame(width: 7, height: 7).offset(x: 1, y: 0)
+                        let progress = ringProgress(for: date, isFuture: isFuture)
+                        Button { selectedDate = Calendar.current.startOfDay(for: date) } label: {
+                            VStack(spacing: 2) {
+                                Text("\(day)").font(.system(size: 10, weight: isToday || Calendar.current.isDate(date, inSameDayAs: selectedDate) ? .bold : .medium)).foregroundStyle(isFuture ? AppPalette.muted.opacity(0.55) : AppPalette.ink)
+                                ZStack(alignment: .topTrailing) {
+                                    TripleRings(progress: progress, size: 27, lineWidth: 2.5, faded: isFuture || model.dailyHistory[Calendar.current.startOfDay(for: date)] == nil && !isToday)
+                                        .frame(width: 29, height: 29)
+                                    if !isFuture && allGoalsClosed(on: date) {
+                                        Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(AppPalette.green).background(.white, in: Circle()).offset(x: 2, y: -2)
+                                    }
                                 }
                             }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 2)
+                            .background(Calendar.current.isDate(date, inSameDayAs: selectedDate) ? AppPalette.aqua.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.plain)
                     } else {
                         Color.clear.frame(height: 42)
                     }
@@ -149,13 +191,18 @@ struct DashboardView: View {
         .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 22))
     }
 
-    private func ringProgress(for day: Int, isFuture: Bool, isToday: Bool) -> [CGFloat] {
+    private func ringProgress(for date: Date, isFuture: Bool) -> [CGFloat] {
         if isFuture { return [0, 0, 0] }
-        if isToday, let data = model.data {
-            return [min(CGFloat(data.exerciseMinutes / 30), 1), min(CGFloat(data.activeCalories.total / 500), 1), min(CGFloat(data.exerciseMinutes / 12), 1)]
-        }
-        // Визуальный заполненный календарь для прототипа; исторические дневные запросы добавляются отдельно.
-        return [day % 5 == 0 ? 0.35 : (day % 4 == 0 ? 0.65 : 1), day % 6 == 0 ? 0.25 : 1, day % 7 == 0 ? 0.45 : (day % 3 == 0 ? 0.75 : 1)]
+        let key = Calendar.current.startOfDay(for: date)
+        let dayData = model.dailyHistory[key] ?? (Calendar.current.isDateInToday(date) ? model.data : nil)
+        guard let data = dayData else { return [0, 0, 0] }
+        return [min(CGFloat(data.exerciseMinutes / max(goalExerciseMinutes, 1)), 1), min(CGFloat(data.activeCalories.total / max(goalActiveCalories, 1)), 1), min(CGFloat(data.standHours / max(goalStandHours, 1)), 1)]
+    }
+
+    private func allGoalsClosed(on date: Date) -> Bool {
+        let key = Calendar.current.startOfDay(for: date)
+        guard let data = model.dailyHistory[key] ?? (Calendar.current.isDateInToday(date) ? model.data : nil) else { return false }
+        return data.exerciseMinutes >= goalExerciseMinutes && data.activeCalories.total >= goalActiveCalories && data.standHours >= goalStandHours
     }
 
     private func legendDot(_ color: Color, _ text: String) -> some View {
@@ -256,6 +303,7 @@ private struct CompetitionModeSelectionView: View {
     @Environment(\.dismiss) private var dismiss
     let selectedDevice: String
     @State private var mode = 0
+    @State private var duration = "Месяц"
     @State private var openSummary = false
     var body: some View {
         VStack(spacing: 0) {
@@ -264,6 +312,16 @@ private struct CompetitionModeSelectionView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Тип\nсоревнования").font(.system(size: 34, weight: .heavy, design: .rounded)).foregroundStyle(AppPalette.ink)
                     Text("Выберите, по каким правилам будем соревноваться.").font(.system(size: 17)).foregroundStyle(AppPalette.muted)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Длительность").font(.system(size: 15, weight: .bold))
+                        Picker("Длительность", selection: $duration) {
+                            Text("Неделя").tag("Неделя")
+                            Text("Месяц").tag("Месяц")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    .padding(13)
+                    .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
                     ModeTile(title: "Закрытые кольца\nза месяц", subtitle: "Считаем дни, в которые выполнены все три цели активности.", symbol: "rings", tint: Color(red: 1, green: 0.91, blue: 0.68), selected: mode == 0) { mode = 0 }
                     ModeTile(title: "Баллы за активность", subtitle: "Правила начисления баллов будут настроены позже.", symbol: "chart", tint: Color(red: 0.92, green: 0.89, blue: 1), selected: mode == 1) { mode = 1 }
                     ModeTile(title: "Только совпадающие\nпоказатели", subtitle: "Сравниваем только показатели, доступные у обоих участников.", symbol: "overlap", tint: Color(red: 1, green: 0.89, blue: 0.92), selected: mode == 2) { mode = 2 }
@@ -273,7 +331,7 @@ private struct CompetitionModeSelectionView: View {
         }
         .background(LinearGradient(colors: [.white, AppPalette.canvas, Color(red: 0.91, green: 0.99, blue: 0.96)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .navigationDestination(isPresented: $openSummary) { CompetitionMonthlySummaryView(device: selectedDevice, mode: mode) }
+        .navigationDestination(isPresented: $openSummary) { CompetitionMonthlySummaryView(device: selectedDevice, mode: mode, duration: duration) }
     }
 }
 
@@ -302,27 +360,44 @@ private struct ModeTile: View {
 
 private struct CompetitionMonthlySummaryView: View {
     @Environment(\.dismiss) private var dismiss
-    let device: String; let mode: Int
-    @State private var period = 0
+    let device: String; let mode: Int; let duration: String
+    @AppStorage("profileName") private var profileName = "Алексей"
+    @State private var calendarPeriod = 0
     private let months = ["октябрь 2026 г.", "сентябрь 2026 г.", "август 2026 г."]
+    private var demoAlexClosedDays: Int { (1...daysInDisplayedPeriod).filter { demoClosed(day: $0, seed: 2) }.count }
+    private var demoOpponentClosedDays: Int { (1...daysInDisplayedPeriod).filter { demoClosed(day: $0, seed: 4) }.count }
+    private var daysInDisplayedPeriod: Int { duration == "Неделя" ? 7 : 31 }
+    private func demoMetricClosed(day: Int, seed: Int, metric: Int) -> Bool {
+        switch metric {
+        case 0: return (day * 3 + seed) % 7 != 0 && (day + seed) % 5 != 0
+        case 1: return (day * 2 + seed) % 6 != 0
+        default: return (day + seed * 2) % 5 != 0
+        }
+    }
+    private func demoClosed(day: Int, seed: Int) -> Bool {
+        (0..<3).allSatisfy { demoMetricClosed(day: day, seed: seed, metric: $0) }
+    }
+    private func demoMetricCount(seed: Int, metric: Int) -> Int {
+        (1...daysInDisplayedPeriod).filter { demoMetricClosed(day: $0, seed: seed, metric: metric) }.count
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 13) {
                 topBar(title: "Соревнование", back: { dismiss() })
-                Text("Сводка за месяц").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(AppPalette.ink)
-                Text(months[period]).font(.system(size: 14)).foregroundStyle(AppPalette.muted)
+                Text(duration == "Неделя" ? "Сводка за неделю" : "Сводка за месяц").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(AppPalette.ink)
+                Text(duration == "Неделя" ? "Последние 7 дней" : months[0]).font(.system(size: 14)).foregroundStyle(AppPalette.muted)
                 HStack(spacing: 10) {
-                    participantSummary(name: "Алексей", device: "Apple Watch", avatar: "🐱", score: [17, 22, 20], progress: [0.57, 0.71, 0.65])
-                    participantSummary(name: "Марина", device: device, avatar: "🐼", score: [24, 28, 26], progress: [0.80, 0.90, 0.84])
+                    participantSummary(name: profileName.isEmpty ? "Вы" : profileName, device: "Apple Watch", avatar: "👤", score: (0..<3).map { demoMetricCount(seed: 2, metric: $0) }, progress: (0..<3).map { CGFloat(demoMetricCount(seed: 2, metric: $0)) / CGFloat(daysInDisplayedPeriod) })
+                    participantSummary(name: "Марина", device: device, avatar: "🐼", score: (0..<3).map { demoMetricCount(seed: 4, metric: $0) }, progress: (0..<3).map { CGFloat(demoMetricCount(seed: 4, metric: $0)) / CGFloat(daysInDisplayedPeriod) })
                 }
                 HStack {
                     Text("Активность по дням").font(.system(size: 17, weight: .heavy, design: .rounded))
                     Spacer()
                     HStack(spacing: 2) {
                         ForEach(["Месяц", "Неделя", "День"].indices, id: \.self) { index in
-                            Button(["Месяц", "Неделя", "День"][index]) { period = index }
-                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(period == index ? AppPalette.ink : AppPalette.muted)
-                                .padding(.horizontal, 8).padding(.vertical, 6).background(period == index ? Color(red: 0.77, green: 0.98, blue: 0.88) : .clear, in: Capsule())
+                            Button(["Месяц", "Неделя", "День"][index]) { calendarPeriod = index }
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(calendarPeriod == index ? AppPalette.ink : AppPalette.muted)
+                                .padding(.horizontal, 8).padding(.vertical, 6).background(calendarPeriod == index ? Color(red: 0.77, green: 0.98, blue: 0.88) : .clear, in: Capsule())
                         }
                     }.background(.white.opacity(0.8), in: Capsule())
                 }
@@ -330,13 +405,13 @@ private struct CompetitionMonthlySummaryView: View {
                 VStack(spacing: 7) {
                     HStack { Image(systemName: "trophy.fill").foregroundStyle(.orange); Text("Счёт в соревновании").font(.system(size: 11, weight: .semibold)).foregroundStyle(AppPalette.muted) }
                     HStack(spacing: 12) {
-                        Text("🐱 Алексей").font(.system(size: 11, weight: .bold))
-                        Text("1").font(.system(size: 42, weight: .heavy, design: .rounded))
+                        Text("👤 \(profileName.isEmpty ? "Вы" : profileName)").font(.system(size: 11, weight: .bold))
+                        Text("\(demoAlexClosedDays)").font(.system(size: 42, weight: .heavy, design: .rounded))
                         Text(":").font(.system(size: 30, weight: .medium)).foregroundStyle(AppPalette.muted)
-                        Text("2").font(.system(size: 42, weight: .heavy, design: .rounded))
+                        Text("\(demoOpponentClosedDays)").font(.system(size: 42, weight: .heavy, design: .rounded))
                         Text("Марина 🐼").font(.system(size: 11, weight: .bold))
                     }.foregroundStyle(AppPalette.ink)
-                    GeometryReader { geo in HStack(spacing: 0) { AppPalette.mint.frame(width: geo.size.width / 3); AppPalette.aqua.frame(width: geo.size.width * 2 / 3) }.clipShape(Capsule()) }.frame(height: 7).padding(.horizontal, 20)
+                    GeometryReader { geo in HStack(spacing: 0) { AppPalette.mint.frame(width: geo.size.width * CGFloat(demoAlexClosedDays) / CGFloat(max(demoAlexClosedDays + demoOpponentClosedDays, 1))); AppPalette.aqua.frame(width: geo.size.width * CGFloat(demoOpponentClosedDays) / CGFloat(max(demoAlexClosedDays + demoOpponentClosedDays, 1))) }.clipShape(Capsule()) }.frame(height: 7).padding(.horizontal, 20)
                 }.padding(14).frame(maxWidth: .infinity).background(LinearGradient(colors: [Color(red: 0.92, green: 0.99, blue: 0.94), Color(red: 0.90, green: 0.98, blue: 0.97)], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 20))
                 Text("Демонстрационные данные соперника. Подключение Xiaomi пока не настроено.").font(.system(size: 10)).foregroundStyle(AppPalette.muted).padding(.horizontal, 4)
             }.padding(12)
@@ -350,7 +425,7 @@ private struct CompetitionMonthlySummaryView: View {
             ZStack { TripleRings(progress: progress, size: 96, lineWidth: 8).frame(width: 96, height: 96) }
                 .frame(maxWidth: .infinity).padding(.vertical, 3)
             ForEach(0..<3, id: \.self) { i in
-                HStack(spacing: 5) { Circle().fill([AppPalette.pink, AppPalette.green, AppPalette.blue][i]).frame(width: 8, height: 8); Text("\(score[i]) из 30").font(.system(size: 10, weight: .bold)); Spacer(minLength: 0) }
+                HStack(spacing: 5) { Circle().fill([AppPalette.pink, AppPalette.green, AppPalette.blue][i]).frame(width: 8, height: 8); Text("\(score[i]) из \(daysInDisplayedPeriod)").font(.system(size: 10, weight: .bold)); Spacer(minLength: 0) }
                 Text(["Упражнения", "Калории", "Разминка"][i]).font(.system(size: 9)).foregroundStyle(AppPalette.muted).padding(.leading, 13)
             }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 18))
@@ -360,13 +435,78 @@ private struct CompetitionMonthlySummaryView: View {
             HStack { Text(name).font(.system(size: 10, weight: .bold)); Spacer(); Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(AppPalette.muted) }
             HStack { ForEach(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"], id: \.self) { Text($0).font(.system(size: 7)).foregroundStyle(AppPalette.muted).frame(maxWidth: .infinity) } }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 5) {
-                ForEach(1...35, id: \.self) { day in
-                    if day <= 31 {
-                        VStack(spacing: 1) { Text("\(day)").font(.system(size: 7)).foregroundStyle(AppPalette.muted); TripleRings(progress: day % 5 == 0 ? [0.4, 0.3, 0.5] : [CGFloat((day + seed) % 4 + 1) / 4, 0.8, 1], size: 15, lineWidth: 1.5).frame(width: 15, height: 15) }
+                ForEach(1...((duration == "Неделя") ? 7 : 35), id: \.self) { day in
+                    if day <= daysInDisplayedPeriod {
+                        VStack(spacing: 1) { Text("\(day)").font(.system(size: 7)).foregroundStyle(AppPalette.muted); TripleRings(progress: (0..<3).map { demoMetricClosed(day: day, seed: seed, metric: $0) ? 1 : CGFloat((day + seed + $0) % 3 + 1) / 5 }, size: 15, lineWidth: 1.5).frame(width: 15, height: 15) }
                     } else { Color.clear.frame(height: 23) }
                 }
             }
         }.padding(8).frame(maxWidth: .infinity).background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 15))
+    }
+}
+
+
+private struct AccountView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("profileName") private var profileName = "Алексей"
+    @AppStorage("profileEmail") private var profileEmail = ""
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Профиль") {
+                    TextField("Имя", text: $profileName)
+                    TextField("Электронная почта (необязательно)", text: $profileEmail)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                }
+                Section {
+                    Text("Профиль хранится только на этом устройстве. Регистрация и синхронизация между телефонами пока не подключены.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Аккаунт")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
+        }
+    }
+}
+
+private struct GoalsSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("goalExerciseMinutes") private var exerciseGoal = 30.0
+    @AppStorage("goalActiveCalories") private var calorieGoal = 500.0
+    @AppStorage("goalStandHours") private var standGoal = 12.0
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Цели активности") {
+                    VStack(alignment: .leading) {
+                        HStack { Text("Упражнения"); Spacer(); Text("\(Int(exerciseGoal)) мин").foregroundStyle(.secondary) }
+                        Slider(value: $exerciseGoal, in: 5...180, step: 5)
+                    }
+                    VStack(alignment: .leading) {
+                        HStack { Text("Калории"); Spacer(); Text("\(Int(calorieGoal)) ккал").foregroundStyle(.secondary) }
+                        Slider(value: $calorieGoal, in: 100...2000, step: 50)
+                    }
+                    VStack(alignment: .leading) {
+                        HStack { Text("Разминка"); Spacer(); Text("\(Int(standGoal)) ч").foregroundStyle(.secondary) }
+                        Slider(value: $standGoal, in: 1...24, step: 1)
+                    }
+                }
+                Section {
+                    Text("По умолчанию используются стартовые значения приложения. HealthKit не предоставляет сторонним приложениям доступ к персональным целям колец Apple Watch, поэтому задайте свои значения здесь.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Button("Вернуть значения по умолчанию") {
+                    exerciseGoal = 30
+                    calorieGoal = 500
+                    standGoal = 12
+                }
+            }
+            .navigationTitle("Настройки")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Готово") { dismiss() } } }
+        }
     }
 }
 

@@ -35,6 +35,8 @@ struct ActivityData {
     var workoutMinutes = Metric()
     /// «Минуты упражнений» из колец Apple — для сравнения с тренировками.
     var exerciseMinutes: Double = 0
+    /// Часы стояния за день из HealthKit (кольцо «Разминка» в интерфейсе прототипа).
+    var standHours: Double = 0
     var sources: [SourceInfo] = []
     var syncedAt: Date
 }
@@ -47,4 +49,5 @@ protocol ActivityProvider {
     var isAvailable: Bool { get }
     func requestAccess() async throws
     func fetchToday() async throws -> ActivityData
+    func fetch(for date: Date) async throws -> ActivityData
 }

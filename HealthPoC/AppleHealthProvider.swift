@@ -19,6 +19,7 @@ final class AppleHealthProvider: ActivityProvider {
     private let stepType = HKQuantityType(.stepCount)
     private let energyType = HKQuantityType(.activeEnergyBurned)
     private let exerciseType = HKQuantityType(.appleExerciseTime)
+    private let standType = HKCategoryType(.appleStandHour)
 
     // ── Этап 2: разрешения ─────────────────────────────────────
     /// Показывает системное окно Apple «Разрешить доступ к данным Здоровья».
@@ -28,35 +29,54 @@ final class AppleHealthProvider: ActivityProvider {
             stepType,
             energyType,
             exerciseType,
-            HKObjectType.workoutType()
+            HKObjectType.workoutType(),
+            standType
         ]
         try await store.requestAuthorization(toShare: [], read: read)
     }
 
-    // ── Этап 3: данные за сегодня ──────────────────────────────
+    // ── Данные за конкретный календарный день ──────────────────
     func fetchToday() async throws -> ActivityData {
-        let now = Date()
-        let startOfDay = Calendar.current.startOfDay(for: now)
-        let today = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: [])
+        try await fetch(for: Date())
+    }
 
-        var result = ActivityData(date: startOfDay, deviceType: deviceName, syncedAt: now)
+    func fetch(for date: Date) async throws -> ActivityData {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            throw NSError(domain: "AppleHealthProvider", code: 1, userInfo: [NSLocalizedDescriptionKey: "Не удалось определить границы дня"])
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: [])
+        var result = ActivityData(date: startOfDay, deviceType: deviceName, syncedAt: Date())
         var allSources = Set<SourceInfo>()
 
-        let steps = try await quantityMetric(stepType, unit: .count(), today)
+        let steps = try await quantityMetric(stepType, unit: .count(), predicate)
         result.steps = steps.metric
         allSources.formUnion(steps.sources)
 
-        let energy = try await quantityMetric(energyType, unit: .kilocalorie(), today)
+        let energy = try await quantityMetric(energyType, unit: .kilocalorie(), predicate)
         result.activeCalories = energy.metric
         allSources.formUnion(energy.sources)
 
-        let workouts = try await workoutMetric(today)
+        let workouts = try await workoutMetric(predicate)
         result.workoutMinutes = workouts.metric
         allSources.formUnion(workouts.sources)
 
-        result.exerciseMinutes = try await statisticsSum(exerciseType, unit: .minute(), today)
+        result.exerciseMinutes = try await statisticsSum(exerciseType, unit: .minute(), predicate)
+        result.standHours = try await standHoursCount(predicate)
         result.sources = allSources.sorted { $0.isWatch && !$1.isWatch }
         return result
+    }
+
+    private func standHoursCount(_ predicate: NSPredicate) async throws -> Double {
+        let samples = try await HKSampleQueryDescriptor(
+            predicates: [.categorySample(type: standType, predicate: predicate)],
+            sortDescriptors: []
+        ).result(for: store)
+        // Считаем только часы, когда пользователь действительно стоял/двигался.
+        return Double(Set(samples.filter { $0.value == HKCategoryValueAppleStandHour.stood.rawValue }.map {
+            Calendar.current.component(.hour, from: $0.startDate)
+        }).count)
     }
 
     // ── Вспомогательные функции ────────────────────────────────

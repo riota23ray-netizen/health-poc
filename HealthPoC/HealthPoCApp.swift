@@ -34,6 +34,8 @@ final class AppModel: ObservableObject {
 
     @Published var screen: Screen = .loading
     @Published var data: ActivityData?
+    @Published var dailyHistory: [Date: ActivityData] = [:]
+    @Published var historyLoading = false
     @Published var errorText: String?
     @Published var isRefreshing = false
 
@@ -75,10 +77,35 @@ final class AppModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            data = try await provider.fetchToday()
+            let todayData = try await provider.fetchToday()
+            data = todayData
+            dailyHistory[Calendar.current.startOfDay(for: todayData.date)] = todayData
             errorText = nil
         } catch {
             errorText = "Ошибка чтения данных: \(error.localizedDescription)"
+        }
+    }
+
+    /// Загружает реальные дневные значения HealthKit за выбранный месяц.
+    func loadHistory(for month: Date) async {
+        guard let interval = Calendar.current.dateInterval(of: .month, for: month) else { return }
+        historyLoading = true
+        defer { historyLoading = false }
+        let calendar = Calendar.current
+        var day = interval.start
+        while day < min(interval.end, calendar.startOfDay(for: Date())) {
+            let key = calendar.startOfDay(for: day)
+            if dailyHistory[key] == nil {
+                do {
+                    let dayData = try await provider.fetch(for: key)
+                    dailyHistory[key] = dayData
+                } catch {
+                    // Не подменяем отсутствующие данные выдуманными значениями.
+                    errorText = "Не удалось загрузить историю активности: \(error.localizedDescription)"
+                }
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: key) else { break }
+            day = next
         }
     }
 
