@@ -14,6 +14,7 @@
 		AA0000000000000000000105 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000205 /* ConnectView.swift */; };
 		AA0000000000000000000106 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000206 /* DashboardView.swift */; };
 		AA0000000000000000000107 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000208 /* HealthKit.framework */; };
+		AA0000000000000000000110 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000210 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		AA0000000000000000000207 /* HealthPoC.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HealthPoC.entitlements; sourceTree = "<group>"; };
 		AA0000000000000000000208 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		AA0000000000000000000209 /* HealthPoC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HealthPoC.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000210 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +61,7 @@
 				AA0000000000000000000202 /* ActivityData.swift */,
 				AA0000000000000000000203 /* AppleHealthProvider.swift */,
 				AA0000000000000000000207 /* HealthPoC.entitlements */,
+				AA0000000000000000000210 /* Assets.xcassets */,
 			);
 			path = HealthPoC;
 			sourceTree = "<group>";
@@ -143,6 +146,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000000000000000000110 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

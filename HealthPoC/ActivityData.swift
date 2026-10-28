@@ -35,8 +35,6 @@ struct ActivityData {
     var workoutMinutes = Metric()
     /// «Минуты упражнений» из колец Apple — для сравнения с тренировками.
     var exerciseMinutes: Double = 0
-    /// Минуты стояния из HealthKit; для календарного кольца переводятся в часы.
-    var standMinutes: Double = 0
     var sources: [SourceInfo] = []
     var syncedAt: Date
 }
@@ -49,14 +47,4 @@ protocol ActivityProvider {
     var isAvailable: Bool { get }
     func requestAccess() async throws
     func fetchToday() async throws -> ActivityData
-    func fetchMonth(_ date: Date) async throws -> [DailyRingData]
-}
-
-/// Фактические значения трёх колец за один календарный день.
-struct DailyRingData: Identifiable {
-    var id: Date { date }
-    let date: Date
-    let activeCalories: Double
-    let exerciseMinutes: Double
-    let standMinutes: Double
 }

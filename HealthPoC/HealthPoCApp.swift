@@ -34,9 +34,6 @@ final class AppModel: ObservableObject {
 
     @Published var screen: Screen = .loading
     @Published var data: ActivityData?
-    @Published var monthData: [Date: DailyRingData] = [:]
-    @Published var selectedMonth = Calendar.current.startOfMonth(for: Date())
-    @Published var isLoadingMonth = false
     @Published var errorText: String?
     @Published var isRefreshing = false
 
@@ -48,8 +45,7 @@ final class AppModel: ObservableObject {
     /// Экран загрузки: короткая пауза, потом решаем, куда идти.
     func start() async {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
-        let hasChosenDevice = UserDefaults.standard.bool(forKey: "activityDeviceSelectedV1")
-        if UserDefaults.standard.bool(forKey: connectedKey) && hasChosenDevice {
+        if UserDefaults.standard.bool(forKey: connectedKey) {
             screen = .dashboard
             await refresh()
         } else {
@@ -67,7 +63,6 @@ final class AppModel: ObservableObject {
         do {
             try await provider.requestAccess()
             UserDefaults.standard.set(true, forKey: connectedKey)
-            UserDefaults.standard.set(true, forKey: "activityDeviceSelectedV1")
             screen = .dashboard
             await refresh()
         } catch {
@@ -82,28 +77,9 @@ final class AppModel: ObservableObject {
         do {
             data = try await provider.fetchToday()
             errorText = nil
-            await refreshMonth()
         } catch {
             errorText = "Ошибка чтения данных: \(error.localizedDescription)"
         }
-    }
-
-    func refreshMonth() async {
-        isLoadingMonth = true
-        defer { isLoadingMonth = false }
-        do {
-            let days = try await provider.fetchMonth(selectedMonth)
-            monthData = Dictionary(uniqueKeysWithValues: days.map { (Calendar.current.startOfDay(for: $0.date), $0) })
-        } catch {
-            errorText = "Не удалось загрузить историю колец: \(error.localizedDescription)"
-        }
-    }
-
-    func changeMonth(by offset: Int) async {
-        guard let next = Calendar.current.date(byAdding: .month, value: offset, to: selectedMonth) else { return }
-        guard next <= Calendar.current.startOfMonth(for: Date()) else { return }
-        selectedMonth = next
-        await refreshMonth()
     }
 
     /// Для тестов: вернуться на экран подключения.
@@ -111,11 +87,5 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(false, forKey: connectedKey)
         data = nil
         screen = .connect
-    }
-}
-
-private extension Calendar {
-    func startOfMonth(for date: Date) -> Date {
-        dateInterval(of: .month, for: date)?.start ?? startOfDay(for: date)
     }
 }
